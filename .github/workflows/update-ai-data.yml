@@ -1,0 +1,44 @@
+# GitHub Actions の雛形：毎日 1 回、Cloudflare から成績を取り出し、集計した JSON を GitHub Pages に置く。
+# 使い方（README の「あとでやること」4）：
+#   GitHub Pages 用のリポジトリ（公開）に、このファイルを .github/workflows/update-ai-data.yml としてコピーし、
+#   update-ai-data.mjs（npm run build-pages で作ったもの）をリポジトリのいちばん上にコピーする。
+#   リポジトリの Settings → Secrets and variables → Actions で
+#     Variables に STATS_URL（例 https://echofront-stats.あなたの名前.workers.dev）
+#     Secrets に STATS_EXPORT_TOKEN（wrangler secret put EXPORT_TOKEN で入れたのと同じ合言葉）
+#   を入れる。
+#   Variables に STATS_MIN_WORLD_VER（例 0.0.8）を入れると、その版以降に遊んだ試合だけで作る（入れなければ全部）。
+name: AI の動きのデータを更新
+
+on:
+  schedule:
+    - cron: "41 18 * * *" # 毎日 18:41（世界時）＝ 日本時間 3:41
+  workflow_dispatch: # Actions の画面から手で動かすこともできる
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Cloudflare から取り出して集計する
+        run: node update-ai-data.mjs --out ai-profiles.json
+        env:
+          STATS_URL: ${{ vars.STATS_URL }}
+          STATS_EXPORT_TOKEN: ${{ secrets.STATS_EXPORT_TOKEN }}
+          STATS_MIN_WORLD_VER: ${{ vars.STATS_MIN_WORLD_VER }}
+      - name: 変わっていたら保存する
+        run: |
+          if git diff --quiet -- ai-profiles.json && git ls-files --error-unmatch ai-profiles.json >/dev/null 2>&1; then
+            echo "変わっていない"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ai-profiles.json
+          git commit -m "AI の動きのデータを更新"
+          git push
