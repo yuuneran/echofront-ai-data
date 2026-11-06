@@ -7,8 +7,9 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/schema.js
-var SCHEMA_VERSION = 3;
+var PROFILE_SCHEMA = 7;
 var pct = (key, label, jitter2 = 4) => ({ key, label, unit: "%", kind: "number", scale: 10, min: 0, max: 100, jitter: jitter2 });
+var count = (key, label, unit, max) => ({ key, label, unit, kind: "number", scale: 1, min: 0, max, jitter: 0, agg: "count", recordOnly: true });
 var FIELDS = [
   // ── 基本 ──（0〜5）
   { key: "match_minutes", label: "試合に出ていた時間", unit: "分", kind: "number", scale: 100, min: 0, max: 180, required: true, jitter: 0, agg: "count" },
@@ -57,8 +58,75 @@ var FIELDS = [
   { key: "gun_ai_mmr", label: "近い AI の撃ち合い MMR", unit: "MMR", kind: "number", scale: 1, min: 0, max: 9999, jitter: 0 },
   pct("gun_near_pct", "撃ち合いのうち近い AI との割合", 0),
   { key: "act_ai_mmr", label: "近い AI の行動 MMR", unit: "MMR", kind: "number", scale: 1, min: 0, max: 9999, jitter: 0 },
-  pct("act_near_pct", "試合の AI のうち行動 MMR が近い割合", 0)
+  pct("act_near_pct", "試合の AI のうち行動 MMR が近い割合", 0),
+  // ── 回数（分母）──（40〜55。schema 4 から。ここから下は記録だけで、配布のファイルには入れない）
+  count("shots_near", "撃った弾・近（20m まで）", "発", 6e4),
+  count("shots_mid", "撃った弾・中（20〜60m）", "発", 6e4),
+  count("shots_far", "撃った弾・遠（60m より遠く）", "発", 6e4),
+  count("hits_near", "当たった弾・近", "発", 6e4),
+  count("hits_mid", "当たった弾・中", "発", 6e4),
+  count("hits_far", "当たった弾・遠", "発", 6e4),
+  count("reaction_count", "反応の時間を測った回数", "回", 5e3),
+  count("seen_near", "見かけた回数・近", "回", 5e3),
+  count("seen_mid", "見かけた回数・中", "回", 5e3),
+  count("seen_far", "見かけた回数・遠", "回", 5e3),
+  count("pulls_near", "引き金の回数・近", "回", 3e4),
+  count("pulls_mid", "引き金の回数・中", "回", 3e4),
+  count("pulls_far", "引き金の回数・遠", "回", 3e4),
+  count("hurt_count", "傷ついた回数", "回", 5e3),
+  count("revive_chances", "蘇生できた場面の回数", "回", 1e3),
+  count("career_matches", "通算の試合数（この試合を含む）", "試合", 6e4),
+  // ── 試合の状況 ──（56〜61）
+  { key: "map_id", label: "マップの番号", unit: "番号", kind: "category", scale: 1, min: 0, max: 255, recordOnly: true },
+  { key: "mode_id", label: "モードの番号", unit: "番号", kind: "category", scale: 1, min: 0, max: 255, recordOnly: true },
+  count("humans", "試合の人間の数（いちばん多いとき）", "人", 100),
+  count("ais", "試合の AI の数（いちばん多いとき）", "体", 100),
+  count("idle_sec", "放置の秒数", "秒", 10800),
+  count("self_kills", "自爆の回数", "回", 300),
+  // ── 動きが変わる項目 ──（62〜68）
+  count("hit_react_ms", "撃たれてから撃ち返すまで", "ミリ秒", 5e3),
+  count("hit_react_count", "撃たれてから撃ち返すまでを測った回数", "回", 5e3),
+  count("first_hit_ms", "撃ち始めてから初弾が当たるまで", "ミリ秒", 3e3),
+  count("first_hit_count", "撃ち始めてから初弾が当たるまでを測った回数", "回", 5e3),
+  count("reaction_sd_ms", "見えてから撃ち始めるまでのばらつき", "ミリ秒", 3e3),
+  { key: "stop_sd_sec", label: "1 回に止まる時間のばらつき", unit: "秒", kind: "number", scale: 10, min: 0, max: 1800, jitter: 0, recordOnly: true },
+  { key: "move_sd_sec", label: "1 回に動く時間のばらつき", unit: "秒", kind: "number", scale: 10, min: 0, max: 1800, jitter: 0, recordOnly: true },
+  // ── ガジェット ──（69〜71。schema 5 から。配布のファイルにも入れる。0 は「使っていない」）
+  { key: "gadget_1", label: "いちばんよく使ったガジェット", unit: "gadgetId", kind: "category", scale: 1, min: 0, max: 63 },
+  { key: "gadget_2", label: "2 番目によく使ったガジェット", unit: "gadgetId", kind: "category", scale: 1, min: 0, max: 63 },
+  { key: "gadget_uses", label: "ガジェットを使った回数（全部の合計）", unit: "回", kind: "number", scale: 1, min: 0, max: 500, jitter: 0, agg: "count" },
+  // ── 乗り物 ──（72〜82。schema 6 から。記録して成績の表で見るだけ）
+  // veh_kills は kills（32 番）に入らない。歩兵の成績が乗り物で歪まないように分ける
+  { key: "veh_drive_sec", label: "運転・操縦していた秒数", unit: "秒", kind: "number", scale: 1, min: 0, max: 3600, jitter: 0, recordOnly: true },
+  { key: "veh_gun_sec", label: "砲手席の秒数", unit: "秒", kind: "number", scale: 1, min: 0, max: 3600, jitter: 0, recordOnly: true },
+  { key: "veh_ride_sec", label: "そのほかの席の秒数", unit: "秒", kind: "number", scale: 1, min: 0, max: 3600, jitter: 0, recordOnly: true },
+  { key: "veh_kills", label: "乗り物で倒した数（kills には入らない）", unit: "回", kind: "number", scale: 1, min: 0, max: 500, jitter: 0, recordOnly: true },
+  { key: "veh_destroy_car", label: "輸送車を壊した数", unit: "回", kind: "number", scale: 1, min: 0, max: 100, jitter: 0, recordOnly: true },
+  { key: "veh_destroy_tank", label: "戦車を壊した数", unit: "回", kind: "number", scale: 1, min: 0, max: 100, jitter: 0, recordOnly: true },
+  { key: "veh_destroy_heli", label: "ヘリを壊した数", unit: "回", kind: "number", scale: 1, min: 0, max: 100, jitter: 0, recordOnly: true },
+  { key: "veh_repairs", label: "乗り物を直した回数", unit: "回", kind: "number", scale: 1, min: 0, max: 500, jitter: 0, recordOnly: true },
+  { key: "veh_deaths", label: "乗っていて死亡した回数", unit: "回", kind: "number", scale: 1, min: 0, max: 200, jitter: 0, recordOnly: true },
+  { key: "veh_deploys", label: "乗り物から出撃した回数", unit: "回", kind: "number", scale: 1, min: 0, max: 200, jitter: 0, recordOnly: true },
+  { key: "veh_bailouts", label: "パラシュートを開いた回数", unit: "回", kind: "number", scale: 1, min: 0, max: 200, jitter: 0, recordOnly: true },
+  // ── ヘリの飛び方と乗り物の武器 ──（83〜91。schema 6 から。有識者の意見。記録だけ）
+  { key: "heli_alt_m", label: "ヘリの平均の高さ", unit: "m", kind: "number", scale: 1, min: 0, max: 1e3, jitter: 0, recordOnly: true },
+  { key: "heli_speed", label: "ヘリの平均の速さ", unit: "m/秒", kind: "number", scale: 10, min: 0, max: 200, jitter: 0, recordOnly: true },
+  { key: "heli_speed_sd", label: "ヘリの速さのばらつき", unit: "m/秒", kind: "number", scale: 10, min: 0, max: 200, jitter: 0, recordOnly: true },
+  { key: "heli_turn_keep_pct", label: "旋回中の速度維持（旋回中の速さ ÷ 直進中の速さ）", unit: "%", kind: "number", scale: 1, min: 0, max: 1e3, jitter: 0, recordOnly: true },
+  { key: "heli_reversals_min", label: "1 分あたりの左右の切り返し", unit: "回/分", kind: "number", scale: 10, min: 0, max: 240, jitter: 0, recordOnly: true },
+  { key: "veh_crashes", label: "敵に撃たれずに壊した回数", unit: "回", kind: "number", scale: 1, min: 0, max: 100, jitter: 0, recordOnly: true },
+  { key: "veh_shots_main", label: "主砲とロケットを撃った数", unit: "発", kind: "number", scale: 1, min: 0, max: 500, jitter: 0, recordOnly: true },
+  { key: "veh_shots_mg", label: "乗り物の機関銃を撃った数", unit: "発", kind: "number", scale: 1, min: 0, max: 5e3, jitter: 0, recordOnly: true },
+  { key: "veh_hit_pct", label: "乗り物の武器の命中率", unit: "%", kind: "number", scale: 10, min: 0, max: 100, jitter: 0, recordOnly: true },
+  // ── 乗り物の装備 ──（92〜97。schema 7 から。配布のファイルにも入れる。AI の運転手が同じ物を使う）
+  { key: "gear_tank_main", label: "戦車の主武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
+  { key: "gear_tank_sub", label: "戦車の副武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
+  { key: "gear_tank_cm", label: "戦車の対抗手段（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
+  { key: "gear_heli_main", label: "ヘリの主武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
+  { key: "gear_heli_sub", label: "ヘリの副武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
+  { key: "gear_heli_cm", label: "ヘリの対抗手段（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 }
 ];
+var PROFILE_FIELDS = FIELDS.filter((f) => !f.recordOnly);
 function stepOf(field) {
   return 1 / field.scale;
 }
@@ -80,54 +148,8 @@ var STRENGTH_WEIGHTS = {
 var SEED_UNTIL = 20;
 var SEED_PROFILES = [
   {
-    id: "seed-1200",
-    mmr: 1200,
-    stats: {
-      match_minutes: 20,
-      side: 0,
-      platform: 0,
-      class_main: 0,
-      weapon_main: 0,
-      sight_main: 0,
-      accuracy: 8,
-      headshot_rate: 3,
-      reaction_ms: 1200,
-      hold_near: 15,
-      hold_mid: 40,
-      hold_far: 80,
-      engage_dist_m: 20,
-      burst_near: 9,
-      burst_mid: 10,
-      burst_far: 7,
-      move_ratio: 30,
-      crouch_per_min: 0,
-      move_while_shoot: 10,
-      reload_at_pct: 0,
-      stop_sec: 7,
-      move_sec: 5,
-      switch_per_min: 4,
-      retreat_rate: 5,
-      exposed_ratio: 50,
-      obj_time_ratio: 25,
-      plants: 0,
-      defuses: 0,
-      front_pos: 30,
-      squad_ratio: 25,
-      supplies: 0,
-      revive_rate: 5,
-      kills: 2,
-      deaths: 16,
-      kd: 0.13,
-      won: 0,
-      gun_ai_mmr: 1200,
-      gun_near_pct: 100,
-      act_ai_mmr: 1200,
-      act_near_pct: 100
-    }
-  },
-  {
     id: "seed-weak",
-    mmr: 1300,
+    mmr: 1e3,
     stats: {
       match_minutes: 20,
       side: 0,
@@ -165,15 +187,24 @@ var SEED_PROFILES = [
       deaths: 14,
       kd: 0.29,
       won: 0,
-      gun_ai_mmr: 1300,
+      gun_ai_mmr: 1e3,
       gun_near_pct: 100,
-      act_ai_mmr: 1300,
-      act_near_pct: 100
+      act_ai_mmr: 1e3,
+      act_near_pct: 100,
+      gadget_1: 0,
+      gadget_2: 0,
+      gadget_uses: 3,
+      gear_tank_main: 0,
+      gear_tank_sub: 0,
+      gear_tank_cm: 0,
+      gear_heli_main: 0,
+      gear_heli_sub: 0,
+      gear_heli_cm: 0
     }
   },
   {
-    id: "seed-1400",
-    mmr: 1400,
+    id: "seed-1250",
+    mmr: 1250,
     stats: {
       match_minutes: 20,
       side: 0,
@@ -211,10 +242,19 @@ var SEED_PROFILES = [
       deaths: 12,
       kd: 0.67,
       won: 0,
-      gun_ai_mmr: 1400,
+      gun_ai_mmr: 1250,
       gun_near_pct: 100,
-      act_ai_mmr: 1400,
-      act_near_pct: 100
+      act_ai_mmr: 1250,
+      act_near_pct: 100,
+      gadget_1: 0,
+      gadget_2: 0,
+      gadget_uses: 5,
+      gear_tank_main: 0,
+      gear_tank_sub: 0,
+      gear_tank_cm: 0,
+      gear_heli_main: 0,
+      gear_heli_sub: 0,
+      gear_heli_cm: 0
     }
   },
   {
@@ -260,12 +300,21 @@ var SEED_PROFILES = [
       gun_ai_mmr: 1500,
       gun_near_pct: 100,
       act_ai_mmr: 1500,
-      act_near_pct: 100
+      act_near_pct: 100,
+      gadget_1: 0,
+      gadget_2: 0,
+      gadget_uses: 6,
+      gear_tank_main: 0,
+      gear_tank_sub: 0,
+      gear_tank_cm: 0,
+      gear_heli_main: 0,
+      gear_heli_sub: 0,
+      gear_heli_cm: 0
     }
   },
   {
-    id: "seed-1600",
-    mmr: 1600,
+    id: "seed-1750",
+    mmr: 1750,
     stats: {
       match_minutes: 20,
       side: 0,
@@ -303,15 +352,24 @@ var SEED_PROFILES = [
       deaths: 8,
       kd: 2.25,
       won: 0,
-      gun_ai_mmr: 1600,
+      gun_ai_mmr: 1750,
       gun_near_pct: 100,
-      act_ai_mmr: 1600,
-      act_near_pct: 100
+      act_ai_mmr: 1750,
+      act_near_pct: 100,
+      gadget_1: 0,
+      gadget_2: 0,
+      gadget_uses: 8,
+      gear_tank_main: 0,
+      gear_tank_sub: 0,
+      gear_tank_cm: 0,
+      gear_heli_main: 0,
+      gear_heli_sub: 0,
+      gear_heli_cm: 0
     }
   },
   {
     id: "seed-strong",
-    mmr: 1700,
+    mmr: 2e3,
     stats: {
       match_minutes: 20,
       side: 0,
@@ -349,23 +407,89 @@ var SEED_PROFILES = [
       deaths: 7,
       kd: 3.43,
       won: 0,
-      gun_ai_mmr: 1700,
+      gun_ai_mmr: 2e3,
       gun_near_pct: 100,
-      act_ai_mmr: 1700,
-      act_near_pct: 100
+      act_ai_mmr: 2e3,
+      act_near_pct: 100,
+      gadget_1: 0,
+      gadget_2: 0,
+      gadget_uses: 10,
+      gear_tank_main: 0,
+      gear_tank_sub: 0,
+      gear_tank_cm: 0,
+      gear_heli_main: 0,
+      gear_heli_sub: 0,
+      gear_heli_cm: 0
     }
   }
 ];
+var PRACTICE_PROFILE = {
+  id: "practice-750",
+  mmr: 750,
+  stats: {
+    match_minutes: 20,
+    side: 0,
+    platform: 0,
+    class_main: 0,
+    weapon_main: 0,
+    sight_main: 0,
+    accuracy: 8,
+    headshot_rate: 3,
+    reaction_ms: 1100,
+    hold_near: 15,
+    hold_mid: 40,
+    hold_far: 80,
+    engage_dist_m: 20,
+    burst_near: 9,
+    burst_mid: 9,
+    burst_far: 7,
+    move_ratio: 35,
+    crouch_per_min: 0,
+    move_while_shoot: 15,
+    reload_at_pct: 0,
+    stop_sec: 7,
+    move_sec: 5,
+    switch_per_min: 4,
+    retreat_rate: 5,
+    exposed_ratio: 50,
+    obj_time_ratio: 25,
+    plants: 0,
+    defuses: 0,
+    front_pos: 30,
+    squad_ratio: 25,
+    supplies: 0,
+    revive_rate: 5,
+    kills: 2,
+    deaths: 16,
+    kd: 0.13,
+    won: 0,
+    gun_ai_mmr: 750,
+    gun_near_pct: 100,
+    act_ai_mmr: 750,
+    act_near_pct: 100,
+    gadget_1: 0,
+    gadget_2: 0,
+    gadget_uses: 1,
+    gear_tank_main: 0,
+    gear_tank_sub: 0,
+    gear_tank_cm: 0,
+    gear_heli_main: 0,
+    gear_heli_sub: 0,
+    gear_heli_cm: 0
+  }
+};
 
 // src/mmr.js
 var MMR_RULES = {
-  start: 1500,
-  // はじめの MMR（全員の平均もここにそろえる）
-  near: 300,
+  start: 1e3,
+  // はじめの MMR（全員の平均もここにそろえる）。2026-11-05 のテストで、前の 1300＝今の 1000 がちょうどよいと決まった
+  near: 750,
   // 差がこれより大きい AI は数えない（ワールドが数える）
-  kSteps: [[10, 48], [30, 32]],
+  scale: 1e3,
+  // 相手との差がこれだけあると、期待が 10 倍違う（1000〜2000 の幅に合わせた）
+  kSteps: [[10, 120], [30, 80]],
   // [n 試合まで, 動く大きさ]
-  kLast: 16,
+  kLast: 40,
   // それより後の動く大きさ
   base: { kpm: 0.6, acc: 22, obj: 40, bomb: 1, sup: 0.5, dpm: 0.5 },
   // ちょうど平均の人の値（仮）
@@ -375,7 +499,7 @@ var MMR_RULES = {
   gun: { fight: 0.75, live: 0.25 },
   act: { goal: 40, support: 15 },
   total: { goal: 40, fight: 35, support: 15, live: 10 },
-  pick: { offset: -50, spread: 100, gunWeight: 2 }
+  pick: { offset: -125, spread: 250, gunWeight: 2 }
   // AI の選び方（ワールドが使う）
 };
 var SHIFT_MIN_MATCHES = 3;
@@ -418,12 +542,12 @@ function kOf(n, rules = MMR_RULES) {
   }
   return rules.kLast;
 }
-function expectedOf(mine, ai) {
-  return 1 / (1 + 10 ** ((ai - mine) / 400));
+function expectedOf(mine, ai, rules = MMR_RULES) {
+  return 1 / (1 + 10 ** ((ai - mine) / rules.scale));
 }
 function updateMmr(mmr, n, result, aiMmr, nearPct, rules = MMR_RULES) {
   if (aiMmr == null || !(nearPct > 0)) return { mmr, n, moved: false };
-  return { mmr: mmr + kOf(n, rules) * (nearPct / 100) * (result - expectedOf(mmr, aiMmr)), n: n + 1, moved: true };
+  return { mmr: mmr + kOf(n, rules) * (nearPct / 100) * (result - expectedOf(mmr, aiMmr, rules)), n: n + 1, moved: true };
 }
 function sortMatches(matches) {
   return [...matches].sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0) || (a.id ?? 0) - (b.id ?? 0));
@@ -642,7 +766,7 @@ function aggregate(records, options = {}) {
   });
   const medianSource = players.length > 0 ? players.map((p) => p.stats) : SEED_PROFILES.map((s) => s.stats);
   const medians = {};
-  for (const f of FIELDS) {
+  for (const f of PROFILE_FIELDS) {
     const vals = medianSource.map((s) => s[f.key]).filter((v) => v != null).sort((a, b) => a - b);
     if (vals.length === 0) medians[f.key] = f.kind === "category" ? f.min : SEED_PROFILES.find((s) => s.id === "seed-normal").stats[f.key];
     else if (f.kind === "category") medians[f.key] = mostFrequent(vals);
@@ -650,7 +774,7 @@ function aggregate(records, options = {}) {
   }
   const fill = (stats) => {
     const out2 = {};
-    for (const f of FIELDS) out2[f.key] = stats[f.key] ?? medians[f.key];
+    for (const f of PROFILE_FIELDS) out2[f.key] = stats[f.key] ?? medians[f.key];
     return out2;
   };
   let bases = players.map((p) => ({ id: p.key, kind: "real", code: p.code, name: p.name, n: p.n, gun: p.gun, act: p.act, stats: fill(p.stats) }));
@@ -682,15 +806,15 @@ function aggregate(records, options = {}) {
     o.gun = p.gun;
     o.act = p.act;
     o.strength = p.gun;
-    o.v = FIELDS.map((f) => p.stats[f.key]);
+    o.v = PROFILE_FIELDS.map((f) => p.stats[f.key]);
     return o;
   });
-  const weak = SEED_PROFILES.find((s) => s.id === "seed-weak");
-  const practice = { id: weak.id, gun: weak.mmr, act: weak.mmr, strength: weak.mmr, v: FIELDS.map((f) => weak.stats[f.key]) };
+  const weak = PRACTICE_PROFILE;
+  const practice = { id: weak.id, gun: weak.mmr, act: weak.mmr, strength: weak.mmr, v: PROFILE_FIELDS.map((f) => weak.stats[f.key]) };
   const body = {
     format: OUTPUT_FORMAT,
-    schema: SCHEMA_VERSION,
-    fields: FIELDS.map((f) => f.key),
+    schema: PROFILE_SCHEMA,
+    fields: PROFILE_FIELDS.map((f) => f.key),
     strengthWeights: STRENGTH_WEIGHTS,
     mmr: MMR_RULES,
     mmrShift: mmrShift2,
@@ -714,7 +838,7 @@ function aggregate(records, options = {}) {
 function jitter(stats, seedText) {
   const rnd = makeRandom(seedFrom(seedText));
   const out = { ...stats };
-  for (const f of FIELDS) {
+  for (const f of PROFILE_FIELDS) {
     if (f.kind !== "number" || !f.jitter) continue;
     const step = stepOf(f);
     const delta = (rnd() * 2 - 1) * f.jitter;
@@ -768,17 +892,17 @@ function cmpNum(a, b) {
 function checkOutput(json) {
   const problems = [];
   if (json?.format !== OUTPUT_FORMAT) problems.push("format が違う");
-  if (json?.schema !== SCHEMA_VERSION) problems.push("schema が違う");
-  if (!Array.isArray(json?.fields) || json.fields.join(",") !== FIELDS.map((f) => f.key).join(",")) problems.push("fields が違う");
+  if (json?.schema !== PROFILE_SCHEMA) problems.push("schema が違う");
+  if (!Array.isArray(json?.fields) || json.fields.join(",") !== PROFILE_FIELDS.map((f) => f.key).join(",")) problems.push("fields が違う");
   if (!Array.isArray(json?.profiles) || json.profiles.length === 0) problems.push("profiles が空");
   if (typeof json?.mmr?.start !== "number") problems.push("mmr（重み）がない");
   if (!Number.isFinite(json?.mmrShift?.gun) || !Number.isFinite(json?.mmrShift?.act)) problems.push("mmrShift がない");
   for (const p of json?.profiles ?? []) {
-    if (!Array.isArray(p.v) || p.v.length !== FIELDS.length) {
+    if (!Array.isArray(p.v) || p.v.length !== PROFILE_FIELDS.length) {
       problems.push(`${p.id}: 値の数が違う`);
       continue;
     }
-    FIELDS.forEach((f, i) => {
+    PROFILE_FIELDS.forEach((f, i) => {
       const v = p.v[i];
       if (typeof v !== "number" || !Number.isFinite(v)) problems.push(`${p.id}: ${f.key} が数でない`);
       else if (v < f.min || v > f.max) problems.push(`${p.id}: ${f.key}=${v} が範囲の外`);
@@ -796,7 +920,7 @@ function checkOutput(json) {
     if (json.profiles[i - 1].strength > json.profiles[i].strength) problems.push("強さの順になっていない");
   }
   const pr = json?.practice;
-  if (!Array.isArray(pr?.v) || pr.v.length !== FIELDS.length || !Number.isFinite(pr.gun) || !Number.isFinite(pr.act)) problems.push("practice が違う");
+  if (!Array.isArray(pr?.v) || pr.v.length !== PROFILE_FIELDS.length || !Number.isFinite(pr.gun) || !Number.isFinite(pr.act)) problems.push("practice が違う");
   return problems;
 }
 
