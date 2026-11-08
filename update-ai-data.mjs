@@ -10,6 +10,17 @@ import { pathToFileURL } from "node:url";
 var PROFILE_SCHEMA = 7;
 var pct = (key, label, jitter2 = 4) => ({ key, label, unit: "%", kind: "number", scale: 10, min: 0, max: 100, jitter: jitter2 });
 var count = (key, label, unit, max) => ({ key, label, unit, kind: "number", scale: 1, min: 0, max, jitter: 0, agg: "count", recordOnly: true });
+var POS_CELLS = 512;
+var POS_MAX_SHARE = 100;
+var POS_SECTORS = 3;
+var POS_PER_SECTOR = 4;
+var posKey = (s, n) => `pos_s${s}_${n}`;
+function posParts(v) {
+  const cell = v % POS_CELLS;
+  return { share: Math.floor(v / POS_CELLS), cell, ix: Math.floor(cell / 32), iy: cell % 32 };
+}
+var posValue = (share2, cell) => share2 * POS_CELLS + cell;
+var pos = (s, n) => ({ key: posKey(s, n), label: `セクター ${s} でよくいた升 ${n}（割合×512＋升の番号）`, unit: "割合×512＋升", kind: "position", scale: 1, min: 0, max: posValue(POS_MAX_SHARE, POS_CELLS - 1), sector: s });
 var FIELDS = [
   // ── 基本 ──（0〜5）
   { key: "match_minutes", label: "試合に出ていた時間", unit: "分", kind: "number", scale: 100, min: 0, max: 180, required: true, jitter: 0, agg: "count" },
@@ -119,14 +130,28 @@ var FIELDS = [
   { key: "veh_shots_mg", label: "乗り物の機関銃を撃った数", unit: "発", kind: "number", scale: 1, min: 0, max: 5e3, jitter: 0, recordOnly: true },
   { key: "veh_hit_pct", label: "乗り物の武器の命中率", unit: "%", kind: "number", scale: 10, min: 0, max: 100, jitter: 0, recordOnly: true },
   // ── 乗り物の装備 ──（92〜97。schema 7 から。配布のファイルにも入れる。AI の運転手が同じ物を使う）
-  { key: "gear_tank_main", label: "戦車の主武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
-  { key: "gear_tank_sub", label: "戦車の副武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
-  { key: "gear_tank_cm", label: "戦車の対抗手段（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
-  { key: "gear_heli_main", label: "ヘリの主武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
-  { key: "gear_heli_sub", label: "ヘリの副武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 },
-  { key: "gear_heli_cm", label: "ヘリの対抗手段（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63 }
+  { key: "gear_tank_main", label: "戦車の主武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63, ignoreZero: true },
+  { key: "gear_tank_sub", label: "戦車の副武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63, ignoreZero: true },
+  { key: "gear_tank_cm", label: "戦車の対抗手段（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63, ignoreZero: true },
+  { key: "gear_heli_main", label: "ヘリの主武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63, ignoreZero: true },
+  { key: "gear_heli_sub", label: "ヘリの副武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63, ignoreZero: true },
+  { key: "gear_heli_cm", label: "ヘリの対抗手段（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63, ignoreZero: true },
+  // ── よくいた場所 ──（98〜109。schema 8 から。値 = 割合 × 512 ＋ 升の番号。配布のファイルには v でなく pos に入れる）
+  pos(1, 1),
+  pos(1, 2),
+  pos(1, 3),
+  pos(1, 4),
+  pos(2, 1),
+  pos(2, 2),
+  pos(2, 3),
+  pos(2, 4),
+  pos(3, 1),
+  pos(3, 2),
+  pos(3, 3),
+  pos(3, 4)
 ];
-var PROFILE_FIELDS = FIELDS.filter((f) => !f.recordOnly);
+var POS_FIELDS = FIELDS.filter((f) => f.kind === "position");
+var PROFILE_FIELDS = FIELDS.filter((f) => !f.recordOnly && f.kind !== "position");
 function stepOf(field) {
   return 1 / field.scale;
 }
@@ -616,6 +641,7 @@ function validateStats(stats) {
     if (typeof v !== "number" || !Number.isFinite(v) || v < f.min || v > f.max) return { ok: false, reason: `extreme_${f.key}` };
     if (f.reject?.below != null && v < f.reject.below) return { ok: false, reason: `extreme_${f.key}` };
     if (f.reject?.above != null && v > f.reject.above) return { ok: false, reason: `extreme_${f.key}` };
+    if (f.kind === "position" && (!Number.isInteger(v) || posParts(v).share > POS_MAX_SHARE)) return { ok: false, reason: `extreme_${f.key}` };
   }
   for (const r of RULES) {
     if (r.test(stats)) return { ok: false, reason: `extreme_${r.name}` };
@@ -700,7 +726,8 @@ function clamp(f, v) {
 function combineMatches(matches) {
   const out = {};
   for (const f of FIELDS) {
-    const rows = matches.filter((m) => m.stats[f.key] != null);
+    if (f.kind === "position") continue;
+    const rows = matches.filter((m) => m.stats[f.key] != null && !(f.ignoreZero && m.stats[f.key] === 0));
     if (rows.length === 0) continue;
     if (f.kind === "category") {
       const tally = /* @__PURE__ */ new Map();
@@ -737,6 +764,34 @@ function combineMatches(matches) {
   }
   return out;
 }
+function combinePositions(matches) {
+  const maps = /* @__PURE__ */ new Map();
+  const emptySide = () => Array.from({ length: POS_SECTORS }, () => /* @__PURE__ */ new Map());
+  for (const m of matches) {
+    const s = m.stats;
+    if (s.map_id == null || s.side !== 0 && s.side !== 1) continue;
+    for (const f of POS_FIELDS) {
+      const v = s[f.key];
+      if (v == null) continue;
+      if (!maps.has(s.map_id)) maps.set(s.map_id, { a: emptySide(), d: emptySide() });
+      const { share: share2, cell } = posParts(v);
+      const tally = maps.get(s.map_id)[s.side === 0 ? "a" : "d"][f.sector - 1];
+      tally.set(cell, (tally.get(cell) ?? 0) + share2);
+    }
+  }
+  if (maps.size === 0) return null;
+  const out = {};
+  for (const id of [...maps.keys()].sort((x, y) => x - y)) {
+    const sides = maps.get(id);
+    out[String(id)] = { a: sides.a.map(topCells), d: sides.d.map(topCells) };
+  }
+  return out;
+}
+function topCells(tally) {
+  const top = [...tally].sort((x, y) => y[1] - x[1] || x[0] - y[0]).slice(0, POS_PER_SECTOR);
+  const total = top.reduce((a, [, share2]) => a + share2, 0);
+  return top.map(([cell, share2]) => posValue(total > 0 ? Math.round(share2 * POS_MAX_SHARE / total) : 0, cell));
+}
 function aggregate(records, options = {}) {
   const opt = { ...DEFAULT_OPTIONS, ...options };
   const now = opt.now ?? Date.now();
@@ -761,7 +816,8 @@ function aggregate(records, options = {}) {
       n: rows.length,
       gun: roundMmr(mmr.players.get(key).gun + mmr.shift.gun),
       act: roundMmr(mmr.players.get(key).act + mmr.shift.act),
-      stats: combineMatches(rows)
+      stats: combineMatches(rows),
+      pos: combinePositions(rows)
     };
   });
   const medianSource = players.length > 0 ? players.map((p) => p.stats) : SEED_PROFILES.map((s) => s.stats);
@@ -777,7 +833,7 @@ function aggregate(records, options = {}) {
     for (const f of PROFILE_FIELDS) out2[f.key] = stats[f.key] ?? medians[f.key];
     return out2;
   };
-  let bases = players.map((p) => ({ id: p.key, kind: "real", code: p.code, name: p.name, n: p.n, gun: p.gun, act: p.act, stats: fill(p.stats) }));
+  let bases = players.map((p) => ({ id: p.key, kind: "real", code: p.code, name: p.name, n: p.n, gun: p.gun, act: p.act, stats: fill(p.stats), pos: p.pos }));
   if (bases.length > opt.maxProfiles) {
     bases.sort((a, b) => a.gun - b.gun || cmpId(a.id, b.id));
     const picked = [];
@@ -788,7 +844,7 @@ function aggregate(records, options = {}) {
   }
   const seedUsed = players.length < opt.seedUntil;
   if (seedUsed) {
-    for (const s of SEED_PROFILES) bases.push({ id: s.id, kind: "seed", code: null, name: null, n: 0, gun: s.mmr, act: s.mmr, stats: fill(s.stats) });
+    for (const s of SEED_PROFILES) bases.push({ id: s.id, kind: "seed", code: null, name: null, n: 0, gun: s.mmr, act: s.mmr, stats: fill(s.stats), pos: null });
   }
   const profiles = [];
   const copies = Math.min(opt.maxCopiesPerSource, Math.max(1, Math.ceil(opt.targetProfiles / Math.max(bases.length, 1))));
@@ -807,6 +863,7 @@ function aggregate(records, options = {}) {
     o.act = p.act;
     o.strength = p.gun;
     o.v = PROFILE_FIELDS.map((f) => p.stats[f.key]);
+    if (p.pos) o.pos = p.pos;
     return o;
   });
   const weak = PRACTICE_PROFILE;
@@ -912,6 +969,7 @@ function checkOutput(json) {
     if (!["real", "variant", "seed"].includes(p.kind)) problems.push(`${p.id}: kind が違う`);
     if ("code" in p && !isCode(p.code)) problems.push(`${p.id}: 記録コードの形が違う`);
     if (p.kind === "seed" && ("code" in p || "name" in p)) problems.push(`${p.id}: 種の成績に記録コードや名前がある`);
+    if ("pos" in p) problems.push(...checkPos(p));
     if ("name" in p && (typeof p.name !== "string" || p.name.length === 0 || p.name.length > MAX_DISPLAY_NAME)) {
       problems.push(`${p.id}: 名前の形が違う`);
     }
@@ -921,6 +979,33 @@ function checkOutput(json) {
   }
   const pr = json?.practice;
   if (!Array.isArray(pr?.v) || pr.v.length !== PROFILE_FIELDS.length || !Number.isFinite(pr.gun) || !Number.isFinite(pr.act)) problems.push("practice が違う");
+  if (pr && "pos" in pr) problems.push("practice に pos がある");
+  return problems;
+}
+function checkPos(p) {
+  const problems = [];
+  if (p.kind === "seed") problems.push(`${p.id}: 種の成績に pos がある`);
+  if (p.pos == null || typeof p.pos !== "object" || Array.isArray(p.pos) || Object.keys(p.pos).length === 0) return [...problems, `${p.id}: pos の形が違う`];
+  for (const [mapId, sides] of Object.entries(p.pos)) {
+    if (!/^(0|[1-9][0-9]*)$/.test(mapId)) problems.push(`${p.id}: pos のマップの番号 ${mapId} が数でない`);
+    for (const side of ["a", "d"]) {
+      const sectors = sides?.[side];
+      if (!Array.isArray(sectors) || sectors.length !== POS_SECTORS) {
+        problems.push(`${p.id}: pos の ${mapId}.${side} の形が違う`);
+        continue;
+      }
+      for (const list of sectors) {
+        if (!Array.isArray(list) || list.length > POS_PER_SECTOR) {
+          problems.push(`${p.id}: pos の ${mapId}.${side} の升の数が違う`);
+          continue;
+        }
+        for (const v of list) {
+          if (!Number.isInteger(v) || v < 0 || posParts(v).share > POS_MAX_SHARE) problems.push(`${p.id}: pos の値 ${v} が範囲の外`);
+        }
+      }
+    }
+    if (Object.keys(sides ?? {}).some((k) => k !== "a" && k !== "d")) problems.push(`${p.id}: pos の ${mapId} に知らないキーがある`);
+  }
   return problems;
 }
 
