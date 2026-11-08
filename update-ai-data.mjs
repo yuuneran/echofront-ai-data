@@ -7,9 +7,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/schema.js
-var PROFILE_SCHEMA = 7;
+var PROFILE_SCHEMA = 9;
 var pct = (key, label, jitter2 = 4) => ({ key, label, unit: "%", kind: "number", scale: 10, min: 0, max: 100, jitter: jitter2 });
 var count = (key, label, unit, max) => ({ key, label, unit, kind: "number", scale: 1, min: 0, max, jitter: 0, agg: "count", recordOnly: true });
+var veh = (key, label, unit, scale, max, agg) => ({ key, label, unit, kind: "number", scale, min: 0, max, jitter: 0, keepNull: true, ...agg ? { agg } : {} });
+var vehCount = (key, label, unit, max) => veh(key, label, unit, 1, max, "count");
 var POS_CELLS = 512;
 var POS_MAX_SHARE = 100;
 var POS_SECTORS = 3;
@@ -106,11 +108,11 @@ var FIELDS = [
   { key: "gadget_1", label: "いちばんよく使ったガジェット", unit: "gadgetId", kind: "category", scale: 1, min: 0, max: 63 },
   { key: "gadget_2", label: "2 番目によく使ったガジェット", unit: "gadgetId", kind: "category", scale: 1, min: 0, max: 63 },
   { key: "gadget_uses", label: "ガジェットを使った回数（全部の合計）", unit: "回", kind: "number", scale: 1, min: 0, max: 500, jitter: 0, agg: "count" },
-  // ── 乗り物 ──（72〜82。schema 6 から。記録して成績の表で見るだけ）
+  // ── 乗り物 ──（72〜82。schema 6 から。72〜74 は schema 9 から配布のファイルにも入れる（v の後ろ）。ほかは記録して成績の表で見るだけ）
   // veh_kills は kills（32 番）に入らない。歩兵の成績が乗り物で歪まないように分ける
-  { key: "veh_drive_sec", label: "運転・操縦していた秒数", unit: "秒", kind: "number", scale: 1, min: 0, max: 3600, jitter: 0, recordOnly: true },
-  { key: "veh_gun_sec", label: "砲手席の秒数", unit: "秒", kind: "number", scale: 1, min: 0, max: 3600, jitter: 0, recordOnly: true },
-  { key: "veh_ride_sec", label: "そのほかの席の秒数", unit: "秒", kind: "number", scale: 1, min: 0, max: 3600, jitter: 0, recordOnly: true },
+  vehCount("veh_drive_sec", "運転・操縦していた秒数", "秒", 3600),
+  vehCount("veh_gun_sec", "砲手席の秒数", "秒", 3600),
+  vehCount("veh_ride_sec", "そのほかの席の秒数", "秒", 3600),
   { key: "veh_kills", label: "乗り物で倒した数（kills には入らない）", unit: "回", kind: "number", scale: 1, min: 0, max: 500, jitter: 0, recordOnly: true },
   { key: "veh_destroy_car", label: "輸送車を壊した数", unit: "回", kind: "number", scale: 1, min: 0, max: 100, jitter: 0, recordOnly: true },
   { key: "veh_destroy_tank", label: "戦車を壊した数", unit: "回", kind: "number", scale: 1, min: 0, max: 100, jitter: 0, recordOnly: true },
@@ -119,16 +121,16 @@ var FIELDS = [
   { key: "veh_deaths", label: "乗っていて死亡した回数", unit: "回", kind: "number", scale: 1, min: 0, max: 200, jitter: 0, recordOnly: true },
   { key: "veh_deploys", label: "乗り物から出撃した回数", unit: "回", kind: "number", scale: 1, min: 0, max: 200, jitter: 0, recordOnly: true },
   { key: "veh_bailouts", label: "パラシュートを開いた回数", unit: "回", kind: "number", scale: 1, min: 0, max: 200, jitter: 0, recordOnly: true },
-  // ── ヘリの飛び方と乗り物の武器 ──（83〜91。schema 6 から。有識者の意見。記録だけ）
-  { key: "heli_alt_m", label: "ヘリの平均の高さ", unit: "m", kind: "number", scale: 1, min: 0, max: 1e3, jitter: 0, recordOnly: true },
-  { key: "heli_speed", label: "ヘリの平均の速さ", unit: "m/秒", kind: "number", scale: 10, min: 0, max: 200, jitter: 0, recordOnly: true },
-  { key: "heli_speed_sd", label: "ヘリの速さのばらつき", unit: "m/秒", kind: "number", scale: 10, min: 0, max: 200, jitter: 0, recordOnly: true },
-  { key: "heli_turn_keep_pct", label: "旋回中の速度維持（旋回中の速さ ÷ 直進中の速さ）", unit: "%", kind: "number", scale: 1, min: 0, max: 1e3, jitter: 0, recordOnly: true },
-  { key: "heli_reversals_min", label: "1 分あたりの左右の切り返し", unit: "回/分", kind: "number", scale: 10, min: 0, max: 240, jitter: 0, recordOnly: true },
-  { key: "veh_crashes", label: "敵に撃たれずに壊した回数", unit: "回", kind: "number", scale: 1, min: 0, max: 100, jitter: 0, recordOnly: true },
+  // ── ヘリの飛び方と乗り物の武器 ──（83〜91。schema 6 から。有識者の意見。83〜88・91 は schema 9 から配布のファイルにも入れる（v の後ろ）。89・90 は記録だけ）
+  veh("heli_alt_m", "ヘリの平均の高さ", "m", 1, 1e3),
+  veh("heli_speed", "ヘリの平均の速さ", "m/秒", 10, 200),
+  veh("heli_speed_sd", "ヘリの速さのばらつき", "m/秒", 10, 200),
+  veh("heli_turn_keep_pct", "旋回中の速度維持（旋回中の速さ ÷ 直進中の速さ）", "%", 1, 1e3),
+  veh("heli_reversals_min", "1 分あたりの左右の切り返し", "回/分", 10, 240),
+  vehCount("veh_crashes", "敵に撃たれずに壊した回数", "回", 100),
   { key: "veh_shots_main", label: "主砲とロケットを撃った数", unit: "発", kind: "number", scale: 1, min: 0, max: 500, jitter: 0, recordOnly: true },
   { key: "veh_shots_mg", label: "乗り物の機関銃を撃った数", unit: "発", kind: "number", scale: 1, min: 0, max: 5e3, jitter: 0, recordOnly: true },
-  { key: "veh_hit_pct", label: "乗り物の武器の命中率", unit: "%", kind: "number", scale: 10, min: 0, max: 100, jitter: 0, recordOnly: true },
+  veh("veh_hit_pct", "乗り物の武器の命中率", "%", 10, 100),
   // ── 乗り物の装備 ──（92〜97。schema 7 から。配布のファイルにも入れる。AI の運転手が同じ物を使う）
   { key: "gear_tank_main", label: "戦車の主武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63, ignoreZero: true },
   { key: "gear_tank_sub", label: "戦車の副武器（番号＋1。0 は使っていない）", unit: "gearId", kind: "category", scale: 1, min: 0, max: 63, ignoreZero: true },
@@ -148,10 +150,62 @@ var FIELDS = [
   pos(3, 1),
   pos(3, 2),
   pos(3, 3),
-  pos(3, 4)
+  pos(3, 4),
+  // ── 乗り物の AI 用の記録 ──（110〜127。schema 9 から。SPEC-v2.md の 14 章。配布のファイルにも入れる（v の後ろ））
+  vehCount("veh_car_sec", "輸送車に乗っていた秒数（どの席でも）", "秒", 3600),
+  vehCount("veh_tank_sec", "戦車に乗っていた秒数（どの席でも）", "秒", 3600),
+  vehCount("veh_heli_sec", "ヘリに乗っていた秒数（どの席でも）", "秒", 3600),
+  vehCount("heli_pilot_sec", "ヘリを操縦していた秒数", "秒", 3600),
+  veh("tank_retreat_rate", "戦車の HP が 4 割を切ったときに下がった割合", "%", 10, 100),
+  vehCount("tank_retreat_count", "戦車が下がったかを確かめた回数", "回", 200),
+  veh("heli_hover_pct", "ヘリが空中で止まっていた割合（秒速 2m より遅い）", "%", 10, 100),
+  veh("heli_alt_sd", "ヘリの高さのばらつき", "m", 10, 1e3),
+  veh("heli_flare_ms", "ミサイルの知らせからフレアを撒くまで", "ミリ秒", 1, 1e4),
+  vehCount("heli_flare_count", "フレアを撒くまでを測った回数", "回", 500),
+  veh("heli_rockets_burst", "ヘリのロケットを 1 回に撃つ数", "発", 10, 100),
+  veh("heli_fire_dist_m", "ヘリの武器を撃った距離", "m", 1, 500),
+  veh("heli_retreat_rate", "ヘリの HP が 4 割を切ったときに離れた割合", "%", 10, 100),
+  vehCount("heli_retreat_count", "ヘリが離れたかを確かめた回数", "回", 200),
+  vehCount("heli_death_aa", "操縦しているヘリが対空砲で壊された回数", "回", 100),
+  vehCount("heli_death_stinger", "操縦しているヘリがスティンガーで壊された回数", "回", 100),
+  vehCount("heli_death_crash", "操縦しているヘリが墜落した回数", "回", 100),
+  vehCount("heli_death_other", "操縦しているヘリがそのほかで壊された回数", "回", 100)
 ];
 var POS_FIELDS = FIELDS.filter((f) => f.kind === "position");
-var PROFILE_FIELDS = FIELDS.filter((f) => !f.recordOnly && f.kind !== "position");
+var PROFILE_APPENDED_KEYS = [
+  "veh_drive_sec",
+  "veh_gun_sec",
+  "veh_ride_sec",
+  "heli_alt_m",
+  "heli_speed",
+  "heli_speed_sd",
+  "heli_turn_keep_pct",
+  "heli_reversals_min",
+  "veh_crashes",
+  "veh_hit_pct",
+  "veh_car_sec",
+  "veh_tank_sec",
+  "veh_heli_sec",
+  "heli_pilot_sec",
+  "tank_retreat_rate",
+  "tank_retreat_count",
+  "heli_hover_pct",
+  "heli_alt_sd",
+  "heli_flare_ms",
+  "heli_flare_count",
+  "heli_rockets_burst",
+  "heli_fire_dist_m",
+  "heli_retreat_rate",
+  "heli_retreat_count",
+  "heli_death_aa",
+  "heli_death_stinger",
+  "heli_death_crash",
+  "heli_death_other"
+];
+var PROFILE_FIELDS = [
+  ...FIELDS.filter((f) => !f.recordOnly && f.kind !== "position" && !PROFILE_APPENDED_KEYS.includes(f.key)),
+  ...PROFILE_APPENDED_KEYS.map((key) => FIELDS.find((f) => f.key === key))
+];
 function stepOf(field) {
   return 1 / field.scale;
 }
@@ -604,6 +658,8 @@ function replayAll(groups, rules = MMR_RULES) {
 
 // src/validate.js
 var ENOUGH_KILLS = 5;
+var VEH_SEC_SLACK = 60;
+var HELI_SEC_SLACK = 5;
 var RULES = [
   {
     name: "too_short",
@@ -629,6 +685,17 @@ var RULES = [
     name: "kd",
     label: "K/D が、倒した数と倒された数から出した値と合わない",
     test: (s) => s.kd != null && Math.abs(s.kd - kdOf(s.kills, s.deaths)) > 0.02
+  },
+  // ── 乗り物の秒数（schema 9。SPEC-v2.md の 14 章）。1 秒ごとに数えるので、数え方のずれの分だけゆるくする ──
+  {
+    name: "veh_sec_over",
+    label: `乗り物に乗っていた秒数（輸送車・戦車・ヘリの合計）が、試合に出ていた時間より ${VEH_SEC_SLACK} 秒より長い`,
+    test: (s) => s.match_minutes != null && (s.veh_car_sec ?? 0) + (s.veh_tank_sec ?? 0) + (s.veh_heli_sec ?? 0) > s.match_minutes * 60 + VEH_SEC_SLACK
+  },
+  {
+    name: "heli_pilot_over",
+    label: `ヘリを操縦していた秒数が、ヘリに乗っていた秒数より ${HELI_SEC_SLACK} 秒より長い`,
+    test: (s) => s.heli_pilot_sec != null && s.veh_heli_sec != null && s.heli_pilot_sec > s.veh_heli_sec + HELI_SEC_SLACK
   }
 ];
 function validateStats(stats) {
@@ -823,6 +890,7 @@ function aggregate(records, options = {}) {
   const medianSource = players.length > 0 ? players.map((p) => p.stats) : SEED_PROFILES.map((s) => s.stats);
   const medians = {};
   for (const f of PROFILE_FIELDS) {
+    if (f.keepNull) continue;
     const vals = medianSource.map((s) => s[f.key]).filter((v) => v != null).sort((a, b) => a - b);
     if (vals.length === 0) medians[f.key] = f.kind === "category" ? f.min : SEED_PROFILES.find((s) => s.id === "seed-normal").stats[f.key];
     else if (f.kind === "category") medians[f.key] = mostFrequent(vals);
@@ -830,7 +898,7 @@ function aggregate(records, options = {}) {
   }
   const fill = (stats) => {
     const out2 = {};
-    for (const f of PROFILE_FIELDS) out2[f.key] = stats[f.key] ?? medians[f.key];
+    for (const f of PROFILE_FIELDS) out2[f.key] = stats[f.key] ?? (f.keepNull ? null : medians[f.key]);
     return out2;
   };
   let bases = players.map((p) => ({ id: p.key, kind: "real", code: p.code, name: p.name, n: p.n, gun: p.gun, act: p.act, stats: fill(p.stats), pos: p.pos }));
@@ -867,7 +935,7 @@ function aggregate(records, options = {}) {
     return o;
   });
   const weak = PRACTICE_PROFILE;
-  const practice = { id: weak.id, gun: weak.mmr, act: weak.mmr, strength: weak.mmr, v: PROFILE_FIELDS.map((f) => weak.stats[f.key]) };
+  const practice = { id: weak.id, gun: weak.mmr, act: weak.mmr, strength: weak.mmr, v: PROFILE_FIELDS.map((f) => weak.stats[f.key] ?? null) };
   const body = {
     format: OUTPUT_FORMAT,
     schema: PROFILE_SCHEMA,
@@ -961,6 +1029,7 @@ function checkOutput(json) {
     }
     PROFILE_FIELDS.forEach((f, i) => {
       const v = p.v[i];
+      if (v === null && f.keepNull) return;
       if (typeof v !== "number" || !Number.isFinite(v)) problems.push(`${p.id}: ${f.key} が数でない`);
       else if (v < f.min || v > f.max) problems.push(`${p.id}: ${f.key}=${v} が範囲の外`);
     });
@@ -979,6 +1048,7 @@ function checkOutput(json) {
   }
   const pr = json?.practice;
   if (!Array.isArray(pr?.v) || pr.v.length !== PROFILE_FIELDS.length || !Number.isFinite(pr.gun) || !Number.isFinite(pr.act)) problems.push("practice が違う");
+  else if (PROFILE_FIELDS.some((f, i) => !(pr.v[i] === null && f.keepNull) && (typeof pr.v[i] !== "number" || pr.v[i] < f.min || pr.v[i] > f.max))) problems.push("practice の値が違う");
   if (pr && "pos" in pr) problems.push("practice に pos がある");
   return problems;
 }
