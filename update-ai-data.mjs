@@ -784,8 +784,10 @@ var DEFAULT_OPTIONS = {
   maxCopiesPerSource: 16,
   // 1 人の成績から作る数の上限（元 1 ＋ ずらし 15）
   seedUntil: SEED_UNTIL,
-  minWorldVer: ""
+  minWorldVer: "",
   // この版以降に遊んだ試合だけ使う（空なら全部）
+  aiStats: []
+  // 「あなたの AI」の戦績（取り出しの [["記録コード", 出現した回数, 倒した数], …]）
 };
 function clamp(f, v) {
   return Math.min(f.max, Math.max(f.min, v));
@@ -950,7 +952,8 @@ function aggregate(records, options = {}) {
     seedUsed,
     profileCount: out.length,
     profiles: out,
-    practice
+    practice,
+    aiStats: aiStatsObject(opt.aiStats)
   };
   return {
     format: body.format,
@@ -959,6 +962,15 @@ function aggregate(records, options = {}) {
     dataHash: seedFrom(JSON.stringify(body)).toString(16).padStart(8, "0"),
     ...body
   };
+}
+function aiStatsObject(list) {
+  const out = {};
+  if (!Array.isArray(list)) return out;
+  const isCount = (n) => Number.isInteger(n) && n >= 0;
+  const rows = list.filter((r) => Array.isArray(r) && isCode(r[0]) && isCount(r[1]) && isCount(r[2]));
+  rows.sort((a, b) => cmpId(a[0], b[0]));
+  for (const [code, seen, kills] of rows) out[code] = [seen, kills];
+  return out;
 }
 function jitter(stats, seedText) {
   const rnd = makeRandom(seedFrom(seedText));
@@ -1050,6 +1062,14 @@ function checkOutput(json) {
   if (!Array.isArray(pr?.v) || pr.v.length !== PROFILE_FIELDS.length || !Number.isFinite(pr.gun) || !Number.isFinite(pr.act)) problems.push("practice が違う");
   else if (PROFILE_FIELDS.some((f, i) => !(pr.v[i] === null && f.keepNull) && (typeof pr.v[i] !== "number" || pr.v[i] < f.min || pr.v[i] > f.max))) problems.push("practice の値が違う");
   if (pr && "pos" in pr) problems.push("practice に pos がある");
+  const ai = json?.aiStats;
+  if (ai == null || typeof ai !== "object" || Array.isArray(ai)) problems.push("aiStats の形が違う");
+  else {
+    for (const [code, v] of Object.entries(ai)) {
+      if (!isCode(code)) problems.push(`aiStats: 記録コード ${code} の形が違う`);
+      if (!Array.isArray(v) || v.length !== 2 || !v.every((n) => Number.isInteger(n) && n >= 0)) problems.push(`aiStats: ${code} の数の形が違う`);
+    }
+  }
   return problems;
 }
 function checkPos(p) {
@@ -1090,7 +1110,7 @@ async function run({ url, token, out, now = Date.now(), minWorldVer = "" }) {
   if (!res.ok) throw new Error(`取り出せなかった（${res.status}）`);
   const raw = await res.json();
   if (raw?.format !== 2 || !Array.isArray(raw.matches)) throw new Error("取り出した成績の形がおかしい");
-  const json = aggregate(raw.matches, { now, minWorldVer });
+  const json = aggregate(raw.matches, { now, minWorldVer, aiStats: raw.aiStats ?? [] });
   const problems = checkOutput(json);
   if (problems.length) throw new Error("作った JSON の形がおかしい: " + problems.slice(0, 5).join("・"));
   const text = JSON.stringify(json) + "\n";
